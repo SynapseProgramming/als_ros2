@@ -7,9 +7,24 @@ endif()
 
 # find dependencies
 find_package(ament_cmake REQUIRED)
+find_package(yaml-cpp REQUIRED) 
+find_package(rclcpp REQUIRED)
+
 # uncomment the following section in order to fill in
 # further dependencies manually.
 # find_package(<dependency> REQUIRED)
+
+
+
+
+add_executable(MAE_test src/test_MAEClassifier.cpp)
+target_link_libraries(MAE_test yaml-cpp)
+target_include_directories( MAE_test
+  PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>)
+
+
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
@@ -22,5 +37,15 @@ if(BUILD_TESTING)
   set(ament_cmake_cpplint_FOUND TRUE)
   ament_lint_auto_find_test_dependencies()
 endif()
+
+install(
+  DIRECTORY
+  classifiers
+  DESTINATION share/${PROJECT_NAME}
+)
+
+install(TARGETS
+  MAE_test
+  DESTINATION lib/${PROJECT_NAME})
 
 ament_package()
