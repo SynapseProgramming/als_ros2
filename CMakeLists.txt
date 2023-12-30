@@ -7,9 +7,18 @@ endif()
 
 # find dependencies
 find_package(ament_cmake REQUIRED)
-# uncomment the following section in order to fill in
-# further dependencies manually.
-# find_package(<dependency> REQUIRED)
+find_package(rclcpp REQUIRED)
+find_package(nav_msgs REQUIRED)
+find_package(sensor_msgs REQUIRED)
+
+
+add_executable(gl_pose_sampler src/gl_pose_sampler.cpp)
+ament_target_dependencies(gl_pose_sampler rclcpp sensor_msgs nav_msgs)
+target_include_directories(gl_pose_sampler
+  PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>)
+
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
@@ -22,5 +31,25 @@ if(BUILD_TESTING)
   set(ament_cmake_cpplint_FOUND TRUE)
   ament_lint_auto_find_test_dependencies()
 endif()
+
+
+install(
+  DIRECTORY include/
+  DESTINATION include
+)
+
+
+install(
+  DIRECTORY
+  classifiers
+  DESTINATION share/${PROJECT_NAME}
+)
+
+install(TARGETS
+  gl_pose_sampler
+  DESTINATION lib/${PROJECT_NAME})
+
+
+
 
 ament_package()
