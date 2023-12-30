@@ -103,15 +103,21 @@ namespace als_ros2
         std::string mapName_, scanName_, odomName_, posesName_, localMapName_, sdfKeypointsName_, localSDFKeypointsName_;
         std::string mapFrame_, odomFrame_, baseLinkFrame_, laserFrame_;
 
-        // rclcpp::Subscription<nav_msgs::OccupancyGrid>::SharedPtr mapSub_;
+        rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr mapSub_;
         // rclcpp::Subscription<sensor_msgs::LaserScan>::SharedPtr scanSub_;
         // rclcpp::Subscription<nav_msgs::Odometry>::SharedPtr odomSub_;
 
     public:
         GLPoseSampler() : Node("gl_pose_sampler")
         {
-            // mapSub_ = this->create_subscription<nav_msgs::OccupancyGrid>(
-            //     mapName_, 1, std::bind(&GLPoseSampler::mapCB, this, std::placeholders::_1));
+            mapSub_ = this->create_subscription<nav_msgs::msg::OccupancyGrid>(
+                mapName_, 1, std::bind(&GLPoseSampler::mapCB, this, std::placeholders::_1));
+        }
+
+
+        void mapCB(const nav_msgs::msg::OccupancyGrid::SharedPtr msg)
+        {
+            RCLCPP_INFO(this->get_logger(), "I heard: '%s'", msg->header.frame_id.c_str());
         }
     };
 
