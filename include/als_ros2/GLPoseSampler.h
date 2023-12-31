@@ -153,6 +153,14 @@ namespace als_ros2
         rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr sdfKeypointsPub_;
         rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr localSDFKeypointsPub_;
 
+        Pose baseLink2Laser_;
+
+        int mapWidth_, mapHeight_;
+        double mapResolution_;
+        Pose mapOrigin_;
+        std::vector<signed char> mapData_;
+        bool gotMap_;
+
     public:
         GLPoseSampler() : Node("gl_pose_sampler")
         {
@@ -170,6 +178,24 @@ namespace als_ros2
             sdfKeypointsPub_ = this->create_publisher<visualization_msgs::msg::Marker>(sdfKeypointsName_, 1);
             localSDFKeypointsPub_ = this->create_publisher<visualization_msgs::msg::Marker>(localSDFKeypointsName_, 1);
 
+            sensor_msgs::msg::LaserScan scan_;
+            double keyScanIntervalDist_, keyScanIntervalYaw_;
+            std::vector<sensor_msgs::msg::LaserScan> keyScans_;
+            int keyScansNum_;
+            Pose odomPose_;
+            std::vector<Pose> keyPoses_;
+            bool gotOdom_;
+            std::vector<Keypoint> sdfKeypoints_;
+            std::vector<SDFOrientationFeature> sdfOrientationFeatures_;
+            visualization_msgs::msg::Marker sdfKeypointsMarker_;
+
+            double gradientSquareTH_;
+            double keypointsMinDistFromMap_;
+            double sdfFeatureWindowSize_;
+            double averageSDFDeltaTH_;
+            bool addRandomSamples_, addOppositeSamples_;
+            int randomSamplesNum_;
+            double positionalRandomNoise_, angularRandomNoise_, matchingRateTH_;
         }
 
         // TODO: fill up mapCB
@@ -196,35 +222,6 @@ namespace als_ros2
     private:
         ros::NodeHandle nh_;
 
-
-        Pose baseLink2Laser_;
-
-        int mapWidth_, mapHeight_;
-        double mapResolution_;
-        Pose mapOrigin_;
-        std::vector<signed char> mapData_;
-        bool gotMap_;
-
-        sensor_msgs::LaserScan scan_;
-        double keyScanIntervalDist_, keyScanIntervalYaw_;
-        std::vector<sensor_msgs::LaserScan> keyScans_;
-        int keyScansNum_;
-
-        Pose odomPose_;
-        std::vector<Pose> keyPoses_;
-        bool gotOdom_;
-
-        std::vector<Keypoint> sdfKeypoints_;
-        std::vector<SDFOrientationFeature> sdfOrientationFeatures_;
-        visualization_msgs::Marker sdfKeypointsMarker_;
-
-        double gradientSquareTH_;
-        double keypointsMinDistFromMap_;
-        double sdfFeatureWindowSize_;
-        double averageSDFDeltaTH_;
-        bool addRandomSamples_, addOppositeSamples_;
-        int randomSamplesNum_;
-        double positionalRandomNoise_, angularRandomNoise_, matchingRateTH_;
 
         tf::TransformBroadcaster tfBroadcaster_;
         tf::TransformListener tfListener_;
