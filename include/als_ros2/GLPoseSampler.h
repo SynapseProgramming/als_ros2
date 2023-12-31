@@ -104,21 +104,42 @@ namespace als_ros2
         std::string mapFrame_, odomFrame_, baseLinkFrame_, laserFrame_;
 
         rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr mapSub_;
-        // rclcpp::Subscription<sensor_msgs::LaserScan>::SharedPtr scanSub_;
-        // rclcpp::Subscription<nav_msgs::Odometry>::SharedPtr odomSub_;
+        rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr scanSub_;
+        rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odomSub_;
 
     public:
         GLPoseSampler() : Node("gl_pose_sampler")
         {
             mapSub_ = this->create_subscription<nav_msgs::msg::OccupancyGrid>(
                 mapName_, 1, std::bind(&GLPoseSampler::mapCB, this, std::placeholders::_1));
+
+            scanSub_ = this->create_subscription<sensor_msgs::msg::LaserScan>(
+                scanName_, 1, std::bind(&GLPoseSampler::scanCB, this, std::placeholders::_1));
+
+            odomSub_ = this->create_subscription<nav_msgs::msg::Odometry>(
+                odomName_, 1, std::bind(&GLPoseSampler::odomCB, this, std::placeholders::_1));
         }
 
-
+        // TODO: fill up mapCB
         void mapCB(const nav_msgs::msg::OccupancyGrid::SharedPtr msg)
         {
             RCLCPP_INFO(this->get_logger(), "I heard: '%s'", msg->header.frame_id.c_str());
         }
+
+
+        // TODO: fill up scanCB
+        void scanCB(const sensor_msgs::msg::LaserScan::SharedPtr msg)
+        {
+            RCLCPP_INFO(this->get_logger(), "I heard: '%s'", msg->header.frame_id.c_str());
+        }
+
+
+        //TODO: fill up odomCB
+        void odomCB(const nav_msgs::msg::Odometry::SharedPtr msg)
+        {
+            RCLCPP_INFO(this->get_logger(), "I heard: '%s'", msg->header.frame_id.c_str());
+        }
+
     };
 
     /*
