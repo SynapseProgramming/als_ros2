@@ -27,15 +27,16 @@
 // #include <sensor_msgs/LaserScan.h>
 // #include <nav_msgs/OccupancyGrid.h>
 // #include <nav_msgs/Odometry.h>
-// #include <geometry_msgs/PoseArray.h>
 // #include <tf/transform_broadcaster.h>
 // #include <tf/transform_listener.h>
-// #include <visualization_msgs/Marker.h>
 // #include <opencv2/opencv.hpp>
 
 #include <nav_msgs/msg/occupancy_grid.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <sensor_msgs/msg/laser_scan.hpp>
+#include <geometry_msgs/msg/pose_array.hpp>
+#include <visualization_msgs/msg/marker.hpp>
+
 #include "rclcpp/rclcpp.hpp"
 #include "als_ros2/Pose.h"
 
@@ -44,6 +45,14 @@ using namespace std::chrono_literals;
 namespace als_ros2
 {
 
+    /**
+     * @brief Represents a keypoint with its coordinates and type.
+     *
+     * The Keypoint class stores the coordinates (u, v) and the corresponding
+     * world coordinates (x, y) of a keypoint. It also stores the type of the
+     * keypoint, which can be -2 (invalid), -1 (local minima), 0 (saddle), or
+     * 1 (local maxima).
+     */
     class Keypoint
     {
     private:
@@ -77,6 +86,9 @@ namespace als_ros2
         inline void setType(char type) { type_ = type; }
     }; // class Keypoint
 
+    /**
+     * @brief Represents a feature that describes the orientation of a surface using signed distance fields (SDF).
+     */
     class SDFOrientationFeature
     {
     private:
@@ -85,15 +97,44 @@ namespace als_ros2
         std::vector<int> relativeOrientationHist_;
 
     public:
+        /**
+         * @brief Default constructor for SDFOrientationFeature.
+         */
         SDFOrientationFeature(void) {}
 
+        /**
+         * @brief Constructor for SDFOrientationFeature.
+         * @param dominantOrientation The dominant orientation of the surface.
+         * @param averageSDF The average signed distance field value of the surface.
+         * @param relativeOrientationHist The histogram of relative orientations of the surface.
+         */
         SDFOrientationFeature(double dominantOrientation, double averageSDF, std::vector<int> relativeOrientationHist) : dominantOrientation_(dominantOrientation),
                                                                                                                          averageSDF_(averageSDF),
                                                                                                                          relativeOrientationHist_(relativeOrientationHist) {}
 
+        /**
+         * @brief Get the dominant orientation of the surface.
+         * @return The dominant orientation.
+         */
         inline double getDominantOrientation(void) { return dominantOrientation_; }
+
+        /**
+         * @brief Get the average signed distance field value of the surface.
+         * @return The average signed distance field value.
+         */
         inline double getAverageSDF(void) { return averageSDF_; }
+
+        /**
+         * @brief Get the histogram of relative orientations of the surface.
+         * @return The histogram of relative orientations.
+         */
         std::vector<int> getRelativeOrientationHist(void) { return relativeOrientationHist_; }
+
+        /**
+         * @brief Get the value at the specified index in the histogram of relative orientations.
+         * @param idx The index of the value to retrieve.
+         * @return The value at the specified index.
+         */
         int getRelativeOrientationHist(int idx) { return relativeOrientationHist_[idx]; }
     }; // class SDFOrientationFeature
 
@@ -107,6 +148,11 @@ namespace als_ros2
         rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr scanSub_;
         rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odomSub_;
 
+        rclcpp::Publisher<geometry_msgs::msg::PoseArray>::SharedPtr posesPub_;
+        rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr localMapPub_;
+        rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr sdfKeypointsPub_;
+        rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr localSDFKeypointsPub_;
+
     public:
         GLPoseSampler() : Node("gl_pose_sampler")
         {
@@ -118,6 +164,12 @@ namespace als_ros2
 
             odomSub_ = this->create_subscription<nav_msgs::msg::Odometry>(
                 odomName_, 1, std::bind(&GLPoseSampler::odomCB, this, std::placeholders::_1));
+
+            posesPub_ = this->create_publisher<geometry_msgs::msg::PoseArray>(posesName_, 1);
+            localMapPub_ = this->create_publisher<nav_msgs::msg::OccupancyGrid>(localMapName_, 1);
+            sdfKeypointsPub_ = this->create_publisher<visualization_msgs::msg::Marker>(sdfKeypointsName_, 1);
+            localSDFKeypointsPub_ = this->create_publisher<visualization_msgs::msg::Marker>(localSDFKeypointsName_, 1);
+
         }
 
         // TODO: fill up mapCB
@@ -126,20 +178,17 @@ namespace als_ros2
             RCLCPP_INFO(this->get_logger(), "I heard: '%s'", msg->header.frame_id.c_str());
         }
 
-
         // TODO: fill up scanCB
         void scanCB(const sensor_msgs::msg::LaserScan::SharedPtr msg)
         {
             RCLCPP_INFO(this->get_logger(), "I heard: '%s'", msg->header.frame_id.c_str());
         }
 
-
-        //TODO: fill up odomCB
+        // TODO: fill up odomCB
         void odomCB(const nav_msgs::msg::Odometry::SharedPtr msg)
         {
             RCLCPP_INFO(this->get_logger(), "I heard: '%s'", msg->header.frame_id.c_str());
         }
-
     };
 
     /*
@@ -148,8 +197,6 @@ namespace als_ros2
         ros::NodeHandle nh_;
 
 
-
-        ros::Publisher posesPub_, localMapPub_, sdfKeypointsPub_, localSDFKeypointsPub_;
         Pose baseLink2Laser_;
 
         int mapWidth_, mapHeight_;

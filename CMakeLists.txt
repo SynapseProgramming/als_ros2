@@ -9,11 +9,13 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(nav_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(visualization_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 
 
 add_executable(gl_pose_sampler src/gl_pose_sampler.cpp)
-ament_target_dependencies(gl_pose_sampler rclcpp sensor_msgs nav_msgs)
+ament_target_dependencies(gl_pose_sampler rclcpp sensor_msgs nav_msgs geometry_msgs visualization_msgs)
 target_include_directories(gl_pose_sampler
   PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
