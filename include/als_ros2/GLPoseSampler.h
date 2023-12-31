@@ -189,6 +189,82 @@ namespace als_ros2
     public:
         GLPoseSampler() : Node("gl_pose_sampler")
         {
+
+            this->declare_parameter<std::string>("map_name", "/map");
+            this->get_parameter("map_name", mapName_);
+
+            this->declare_parameter<std::string>("scan_name", "/scan");
+            this->get_parameter("scan_name", scanName_);
+
+            this->declare_parameter<std::string>("odom_name", "/odom");
+            this->get_parameter("odom_name", odomName_);
+
+            this->declare_parameter<std::string>("poses_name", "/gl_sampled_poses");
+            this->get_parameter("poses_name", posesName_);
+
+            this->declare_parameter<std::string>("local_map_name", "/gl_local_map");
+            this->get_parameter("local_map_name", localMapName_);
+
+            this->declare_parameter<std::string>("sdf_keypoints_name", "/gl_sdf_keypoints");
+            this->get_parameter("sdf_keypoints_name", sdfKeypointsName_);
+
+            this->declare_parameter<std::string>("local_sdf_keypoints_name", "/gl_local_sdf_keypoints");
+            this->get_parameter("local_sdf_keypoints_name", localSDFKeypointsName_);
+
+            this->declare_parameter<std::string>("map_frame", "map");
+            this->get_parameter("map_frame", mapFrame_);
+
+            this->declare_parameter<std::string>("odom_frame", "odom");
+            this->get_parameter("odom_frame", odomFrame_);
+
+            this->declare_parameter<std::string>("base_link_frame", "base_link");
+            this->get_parameter("base_link_frame", baseLinkFrame_);
+
+            this->declare_parameter<std::string>("laser_frame", "laser");
+            this->get_parameter("laser_frame", laserFrame_);
+
+            this->declare_parameter<int>("key_scans_num", 5);
+            this->get_parameter("key_scans_num", keyScansNum_);
+
+            this->declare_parameter<double>("key_scan_interval_dist", 0.5);
+            this->get_parameter("key_scan_interval_dist", keyScanIntervalDist_);
+
+            this->declare_parameter<double>("key_scan_interval_yaw", 5.0);
+            this->get_parameter("key_scan_interval_yaw", keyScanIntervalYaw_);
+
+            this->declare_parameter<double>("gradient_square_th", 10e-4);
+            this->get_parameter("gradient_square_th", gradientSquareTH_);
+
+            this->declare_parameter<double>("keypoints_min_dist_from_map", 1.0);
+            this->get_parameter("keypoints_min_dist_from_map", keypointsMinDistFromMap_);
+
+            this->declare_parameter<double>("sdf_feature_window_size", 1.0);
+            this->get_parameter("sdf_feature_window_size", sdfFeatureWindowSize_);
+
+            this->declare_parameter<double>("average_sdf_delta_th", 1.0);
+            this->get_parameter("average_sdf_delta_th", averageSDFDeltaTH_);
+
+            this->declare_parameter<bool>("add_random_samples", true);
+            this->get_parameter("add_random_samples", addRandomSamples_);
+
+            this->declare_parameter<bool>("add_opposite_samples", true);
+            this->get_parameter("add_opposite_samples", addOppositeSamples_);
+
+            this->declare_parameter<int>("random_samples_num", 10);
+            this->get_parameter("random_samples_num", randomSamplesNum_);
+
+            this->declare_parameter<double>("positional_random_noise", 0.5);
+            this->get_parameter("positional_random_noise", positionalRandomNoise_);
+
+            this->declare_parameter<double>("angular_random_noise", 0.3);
+            this->get_parameter("angular_random_noise", angularRandomNoise_);
+
+            this->declare_parameter<double>("matching_rate_th", 0.1);
+            this->get_parameter("matching_rate_th", matchingRateTH_);
+
+            gotMap_ = false;
+            gotOdom_ = false;
+
             mapSub_ = this->create_subscription<nav_msgs::msg::OccupancyGrid>(
                 mapName_, 1, std::bind(&GLPoseSampler::mapCB, this, std::placeholders::_1));
 
