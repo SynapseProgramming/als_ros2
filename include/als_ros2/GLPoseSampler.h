@@ -42,6 +42,7 @@
 
 #include "rclcpp/rclcpp.hpp"
 #include "als_ros2/Pose.h"
+#include <tf2_ros/create_timer_ros.h>
 
 using namespace std::chrono_literals;
 
@@ -186,6 +187,8 @@ namespace als_ros2
         int randomSamplesNum_;
         double positionalRandomNoise_, angularRandomNoise_, matchingRateTH_;
 
+        rclcpp::TimerBase::SharedPtr flagTimer_;
+
     public:
         GLPoseSampler() : Node("gl_pose_sampler")
         {
@@ -279,10 +282,74 @@ namespace als_ros2
             sdfKeypointsPub_ = this->create_publisher<visualization_msgs::msg::Marker>(sdfKeypointsName_, 1);
             localSDFKeypointsPub_ = this->create_publisher<visualization_msgs::msg::Marker>(localSDFKeypointsName_, 1);
 
-            tf_buffer_ =
-                std::make_unique<tf2_ros::Buffer>(this->get_clock());
+            // TODO: add in yaml config file for parameters
+
+            auto timer_interface = std::make_shared<tf2_ros::CreateTimerROS>(
+                this->get_node_base_interface(),
+                this->get_node_timers_interface());
+
+            tf_buffer_ = std::make_unique<tf2_ros::Buffer>(
+                this->get_clock());
+
+            tf_buffer_->setCreateTimerInterface(timer_interface);
+
             tf_listener_ =
                 std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
+
+            keyScanIntervalYaw_ *= M_PI / 180.0;
+            odomPose_.setPose(0.0, 0.0, 0.0);
+
+            flagTimer_ = this->create_wall_timer(
+                std::chrono::seconds(300),
+                std::bind(&GLPoseSampler::checkMapOdom, this));
+
+            // check for transformations between base link frame and laser frame
+            try
+            {
+                // TODO: change the duration of this wait
+                tf_buffer_->waitForTransform(baseLinkFrame_, laserFrame_, tf2::TimePointZero, tf2::durationFromSec(10.0),
+                                             [this](const tf2_ros::TransformStampedFuture &future)
+                                             {
+                                                 try
+                                                 {
+
+                                                     geometry_msgs::msg::TransformStamped transform = future.get();
+
+                                                     RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "Transform from %s to %s is ready!",
+                                                                 transform.header.frame_id.c_str(),
+                                                                 transform.child_frame_id.c_str());
+                                                 }
+                                                 catch (const tf2::LookupException &e)
+                                                 {
+
+                                                     RCLCPP_ERROR(rclcpp::get_logger("rclcpp"), "Failed to get transform: %s", e.what());
+                                                 }
+                                             });
+            }
+            catch (tf2::TransformException &ex)
+            {
+                RCLCPP_ERROR(this->get_logger(), "Cannot get the relative pose from the base link to the laser from the tf tree."
+                                                 " Did you set the static transform publisher between %s to %s?",
+                             baseLinkFrame_.c_str(), laserFrame_.c_str());
+                throw;
+            }
+        }
+
+        void checkMapOdom()
+        {
+
+            RCLCPP_INFO(this->get_logger(), "Checking flags...");
+            if (!gotMap_)
+            {
+                RCLCPP_INFO(this->get_logger(), "No map yet...");
+                rclcpp::shutdown();
+            }
+
+            if (!gotOdom_)
+            {
+                RCLCPP_INFO(this->get_logger(), "No odom yet...");
+                rclcpp::shutdown();
+            }
         }
 
         // TODO: fill up mapCB
@@ -310,100 +377,10 @@ namespace als_ros2
 
     public:
         GLPoseSampler(void):
-            nh_("~"),
-            mapName_("/map"),
-            scanName_("/scan"),
-            odomName_("/odom"),
-            posesName_("/gl_sampled_poses"),
-            localMapName_("/gl_local_map"),
-            sdfKeypointsName_("/gl_sdf_keypoints"),
-            localSDFKeypointsName_("/gl_local_sdf_keypoints"),
-            mapFrame_("map"),
-            odomFrame_("odom"),
-            baseLinkFrame_("base_link"),
-            laserFrame_("laser"),
-            keyScansNum_(5),
-            keyScanIntervalDist_(0.5),
-            keyScanIntervalYaw_(5.0),
-            gradientSquareTH_(10e-4),
-            keypointsMinDistFromMap_(1.0),
-            sdfFeatureWindowSize_(1.0),
-            averageSDFDeltaTH_(1.0),
-            addRandomSamples_(true),
-            addOppositeSamples_(true),
-            randomSamplesNum_(10),
-            positionalRandomNoise_(0.5),
-            angularRandomNoise_(0.3),
-            matchingRateTH_(0.1),
-            gotMap_(false),
-            gotOdom_(false),
             tfListener_()
         {
-            nh_.param("map_name", mapName_, mapName_);
-            nh_.param("scan_name", scanName_, scanName_);
-            nh_.param("odom_name", odomName_, odomName_);
-            nh_.param("poses_name", posesName_, posesName_);
-            nh_.param("local_map_name", localMapName_, localMapName_);
-            nh_.param("sdf_keypoints_name", sdfKeypointsName_, sdfKeypointsName_);
-            nh_.param("local_sdf_keypoints_name", localSDFKeypointsName_, localSDFKeypointsName_);
-            nh_.param("map_frame", mapFrame_, mapFrame_);
-            nh_.param("odom_frame", odomFrame_, odomFrame_);
-            nh_.param("base_link_frame", baseLinkFrame_, baseLinkFrame_);
-            nh_.param("laser_frame", laserFrame_, laserFrame_);
-            nh_.param("key_scans_num", keyScansNum_, keyScansNum_);
-            nh_.param("key_scan_interval_dist", keyScanIntervalDist_, keyScanIntervalDist_);
-            nh_.param("key_scan_interval_yaw", keyScanIntervalYaw_, keyScanIntervalYaw_);
-            nh_.param("gradient_square_th", gradientSquareTH_, gradientSquareTH_);
-            nh_.param("keypoints_min_dist_from_map", keypointsMinDistFromMap_, keypointsMinDistFromMap_);
-            nh_.param("sdf_feature_window_size", sdfFeatureWindowSize_, sdfFeatureWindowSize_);
-            nh_.param("average_sdf_delta_th", averageSDFDeltaTH_, averageSDFDeltaTH_);
-            nh_.param("add_random_samples", addRandomSamples_, addRandomSamples_);
-            nh_.param("add_opposite_samples", addOppositeSamples_, addOppositeSamples_);
-            nh_.param("random_samples_num", randomSamplesNum_, randomSamplesNum_);
-            nh_.param("positional_random_noise", positionalRandomNoise_, positionalRandomNoise_);
-            nh_.param("angular_random_noise", angularRandomNoise_, angularRandomNoise_);
-            nh_.param("matching_rate_th", matchingRateTH_, matchingRateTH_);
 
-            keyScanIntervalYaw_ *= M_PI / 180.0;
 
-            mapSub_ = nh_.subscribe(mapName_, 1, &GLPoseSampler::mapCB, this);
-            odomSub_ = nh_.subscribe(odomName_, 1, &GLPoseSampler::odomCB, this);
-            scanSub_ = nh_.subscribe(scanName_, 1, &GLPoseSampler::scanCB, this);
-
-            posesPub_ = nh_.advertise<geometry_msgs::PoseArray>(posesName_, 1);
-            localMapPub_ = nh_.advertise<nav_msgs::OccupancyGrid>(localMapName_, 1);
-            sdfKeypointsPub_ = nh_.advertise<visualization_msgs::Marker>(sdfKeypointsName_, 1);
-            localSDFKeypointsPub_ = nh_.advertise<visualization_msgs::Marker>(localSDFKeypointsName_, 1);
-
-            odomPose_.setPose(0.0, 0.0, 0.0);
-
-            ros::Rate loopRate(10.0);
-            int cnt;
-            cnt = 0;
-            while (ros::ok()) {
-                ros::spinOnce();
-                cnt++;
-                if (cnt >= 300) {
-                    ROS_ERROR("A map message might not be published.");
-                    exit(1);
-                }
-                if (gotMap_)
-                    break;
-                loopRate.sleep();
-            }
-
-            cnt = 0;
-            while (ros::ok()) {
-                ros::spinOnce();
-                cnt++;
-                if (cnt >= 300) {
-                    ROS_ERROR("A odom message might not be published.");
-                    exit(1);
-                }
-                if (gotOdom_)
-                    break;
-                loopRate.sleep();
-            }
 
             tf::StampedTransform tfBaseLink2Laser;
             cnt = 0;
