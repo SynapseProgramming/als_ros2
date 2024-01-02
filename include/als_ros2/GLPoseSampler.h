@@ -35,14 +35,17 @@
 #include <nav_msgs/msg/odometry.hpp>
 #include <sensor_msgs/msg/laser_scan.hpp>
 #include <geometry_msgs/msg/pose_array.hpp>
+#include <geometry_msgs/msg/transform_stamped.hpp>
 #include <visualization_msgs/msg/marker.hpp>
 
 #include "tf2_ros/transform_listener.h"
 #include "tf2_ros/buffer.h"
+#include <tf2_ros/create_timer_ros.h>
 
 #include "rclcpp/rclcpp.hpp"
 #include "als_ros2/Pose.h"
-#include <tf2_ros/create_timer_ros.h>
+
+#include <tf2/LinearMath/Quaternion.h>
 
 using namespace std::chrono_literals;
 
@@ -189,6 +192,8 @@ namespace als_ros2
 
         rclcpp::TimerBase::SharedPtr flagTimer_;
 
+        geometry_msgs::msg::TransformStamped tfBaseLink2Laser;
+
     public:
         GLPoseSampler() : Node("gl_pose_sampler")
         {
@@ -223,7 +228,7 @@ namespace als_ros2
             this->declare_parameter<std::string>("base_link_frame", "base_link");
             this->get_parameter("base_link_frame", baseLinkFrame_);
 
-            this->declare_parameter<std::string>("laser_frame", "laser");
+            this->declare_parameter<std::string>("laser_frame", "base_laser");
             this->get_parameter("laser_frame", laserFrame_);
 
             this->declare_parameter<int>("key_scans_num", 5);
@@ -313,11 +318,11 @@ namespace als_ros2
                                                  try
                                                  {
 
-                                                     geometry_msgs::msg::TransformStamped transform = future.get();
+                                                     this->tfBaseLink2Laser = future.get();
 
                                                      RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "Transform from %s to %s is ready!",
-                                                                 transform.header.frame_id.c_str(),
-                                                                 transform.child_frame_id.c_str());
+                                                                 this->tfBaseLink2Laser.header.frame_id.c_str(),
+                                                                 this->tfBaseLink2Laser.child_frame_id.c_str());
                                                  }
                                                  catch (const tf2::LookupException &e)
                                                  {
@@ -333,6 +338,18 @@ namespace als_ros2
                              baseLinkFrame_.c_str(), laserFrame_.c_str());
                 throw;
             }
+
+            // print out the quaternion values from tfBaseLink2Laser
+            RCLCPP_INFO(this->get_logger(), "tfBaseLink2Laser: %f, %f, %f, %f",
+                        tfBaseLink2Laser.transform.rotation.x,
+                        tfBaseLink2Laser.transform.rotation.y,
+                        tfBaseLink2Laser.transform.rotation.z,
+                        tfBaseLink2Laser.transform.rotation.w);
+
+            tf2::Quaternion quatBaseLink2Laser(tfBaseLink2Laser.transform.rotation.x,
+                                               tfBaseLink2Laser.transform.rotation.y,
+                                               tfBaseLink2Laser.transform.rotation.z,
+                                               tfBaseLink2Laser.transform.rotation.w);
         }
 
         void checkMapOdom()
@@ -381,34 +398,16 @@ namespace als_ros2
         {
 
 
-
-            tf::StampedTransform tfBaseLink2Laser;
-            cnt = 0;
-            while (ros::ok()) {
-                ros::spinOnce();
-                try {
-                    ros::Time now = ros::Time::now();
-                    tfListener_.waitForTransform(baseLinkFrame_, laserFrame_, now, ros::Duration(2.0));
-                    tfListener_.lookupTransform(baseLinkFrame_, laserFrame_, now, tfBaseLink2Laser);
-                    break;
-                } catch (tf::TransformException ex) {
-                    cnt++;
-                    if (cnt >= 300) {
-                        ROS_ERROR("Cannot get the relative pose from the base link to the laser from the tf tree."
-                            " Did you set the static transform publisher between %s to %s?",
-                            baseLinkFrame_.c_str(), laserFrame_.c_str());
-                        exit(1);
-                    }
-                    loopRate.sleep();
-                }
-            }
             tf::Quaternion quatBaseLink2Laser(tfBaseLink2Laser.getRotation().x(),
                 tfBaseLink2Laser.getRotation().y(),
                 tfBaseLink2Laser.getRotation().z(),
                 tfBaseLink2Laser.getRotation().w());
+
+
             double baseLink2LaserRoll, baseLink2LaserPitch, baseLink2LaserYaw;
             tf::Matrix3x3 rotMatBaseLink2Laser(quatBaseLink2Laser);
             rotMatBaseLink2Laser.getRPY(baseLink2LaserRoll, baseLink2LaserPitch, baseLink2LaserYaw);
+
             baseLink2Laser_.setX(tfBaseLink2Laser.getOrigin().x());
             baseLink2Laser_.setY(tfBaseLink2Laser.getOrigin().y());
             baseLink2Laser_.setYaw(baseLink2LaserYaw);

@@ -13,6 +13,7 @@ find_package(geometry_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(tf2_ros REQUIRED)
+find_package(tf2 REQUIRED)
 
 
 add_executable(gl_pose_sampler src/gl_pose_sampler.cpp)
