@@ -273,6 +273,156 @@ namespace als_ros2
             return distMap;
         }
 
+        std::vector<Keypoint> detectKeypoints(nav_msgs::msg::OccupancyGrid map, cv::Mat distMap)
+        {
+            std::vector<Keypoint> keypoints;
+            tf2::Quaternion q(map.info.origin.orientation.x,
+                              map.info.origin.orientation.y,
+                              map.info.origin.orientation.z,
+                              map.info.origin.orientation.w);
+            double roll, pitch, yaw;
+            tf2::Matrix3x3 m(q);
+            m.getRPY(roll, pitch, yaw);
+            mapOrigin_.setYaw(yaw);
+            for (int u = 1; u < (int)map.info.width - 1; ++u)
+            {
+                for (int v = 1; v < (int)map.info.height - 1; ++v)
+                {
+                    int n = v * map.info.width + u;
+                    if (map.data[n] != 0 || distMap.at<float>(v, u) < keypointsMinDistFromMap_)
+                        continue;
+
+                    float dx = -distMap.at<float>(v - 1, u - 1) - distMap.at<float>(v, u - 1) - distMap.at<float>(v + 1, u - 1) + distMap.at<float>(v - 1, u + 1) + distMap.at<float>(v, u + 1) + distMap.at<float>(v + 1, u + 1);
+                    float dy = -distMap.at<float>(v - 1, u - 1) - distMap.at<float>(v - 1, u) - distMap.at<float>(v - 1, u + 1) + distMap.at<float>(v + 1, u - 1) + distMap.at<float>(v + 1, u) + distMap.at<float>(v + 1, u + 1);
+
+                    float dxx = distMap.at<float>(v, u - 1) - 2.0 * distMap.at<float>(v, u) + distMap.at<float>(v, u + 1);
+                    float dyy = distMap.at<float>(v - 1, u) - 2.0 * distMap.at<float>(v, u) + distMap.at<float>(v + 1, u);
+                    float dxy = distMap.at<float>(v - 1, u - 1) - distMap.at<float>(v - 1, u) - distMap.at<float>(v, u - 1) + 2.0 * distMap.at<float>(v, u) - distMap.at<float>(v, u + 1) - distMap.at<float>(v + 1, u) + distMap.at<float>(v + 1, u + 1);
+                    float det = dxx * dyy - dxy * dxy;
+
+                    if (dx * dx < gradientSquareTH_ && dy * dy < gradientSquareTH_)
+                    {
+                        double xx = (double)u * map.info.resolution;
+                        double yy = (double)v * map.info.resolution;
+                        double dx = xx * cos(yaw) - yy * sin(yaw);
+                        double dy = xx * sin(yaw) + yy * cos(yaw);
+                        double x = dx + map.info.origin.position.x;
+                        double y = dy + map.info.origin.position.y;
+                        if (det > 0.0 && dxx < 0.0) // local maxima
+                            keypoints.push_back(Keypoint(u, v, x, y, 1));
+                        else if (det > 0.0 && dxx > 0.0) // local minima
+                            keypoints.push_back(Keypoint(u, v, x, y, -1));
+                        else if (det < 0.0) // suddle
+                            keypoints.push_back(Keypoint(u, v, x, y, 0));
+                    }
+                }
+            }
+            return keypoints;
+        }
+
+        std::vector<SDFOrientationFeature> calculateFeatures(cv::Mat distMap, std::vector<Keypoint> keypoints)
+        {
+            std::vector<SDFOrientationFeature> features((int)keypoints.size());
+            for (int i = 0; i < (int)keypoints.size(); ++i)
+            {
+                int r = (int)(sdfFeatureWindowSize_ / mapResolution_);
+                int uo = keypoints[i].getU();
+                int vo = keypoints[i].getV();
+                float distSum = 0.0f;
+                int cellNum = 0;
+                std::vector<int> orientHist(36);
+                std::vector<double> orientations;
+
+                for (int u = uo - r; u <= uo + r; ++u)
+                {
+                    for (int v = vo - r; v <= vo + r; ++v)
+                    {
+                        if (u < 1 || distMap.cols - 1 < u || v < 1 || distMap.rows - 1 < v)
+                            continue;
+
+                        distSum += distMap.at<float>(v, u);
+                        cellNum++;
+
+                        float dx = -distMap.at<float>(v - 1, u - 1) - distMap.at<float>(v, u - 1) - distMap.at<float>(v + 1, u - 1) + distMap.at<float>(v - 1, u + 1) + distMap.at<float>(v, u + 1) + distMap.at<float>(v + 1, u + 1);
+                        float dy = -distMap.at<float>(v - 1, u - 1) - distMap.at<float>(v - 1, u) - distMap.at<float>(v - 1, u + 1) + distMap.at<float>(v + 1, u - 1) + distMap.at<float>(v + 1, u) + distMap.at<float>(v + 1, u + 1);
+                        double t = atan2((double)dy, (double)dx) * 180.0 / M_PI;
+                        if (t < 0.0)
+                            t += 360.0;
+                        int orientIdx = (int)(t / 10.0);
+                        if (0 <= orientIdx && orientIdx < 36)
+                        {
+                            orientHist[orientIdx]++;
+                            orientations.push_back(t);
+                        }
+                    }
+                }
+
+                float distAve = distSum / (float)cellNum;
+
+                int maxVal = orientHist[0];
+                double domOrient = 0.0;
+                for (int j = 1; j < (int)orientHist.size(); ++j)
+                {
+                    if (orientHist[j] > maxVal)
+                    {
+                        maxVal = orientHist[j];
+                        domOrient = (double)j * 10.0;
+                    }
+                }
+
+                std::vector<int> relOrientHist(17);
+                for (int j = 0; j < (int)orientations.size(); ++j)
+                {
+                    double dt = domOrient - orientations[j];
+                    while (dt > 180.0)
+                        dt -= 360.0;
+                    while (dt < -180.0)
+                        dt += 360.0;
+                    int relOrientIdx = (int)(fabs(dt) / 10.0);
+                    if (0 <= relOrientIdx && relOrientIdx < 17)
+                        relOrientHist[relOrientIdx]++;
+                }
+
+                SDFOrientationFeature feature(domOrient * M_PI / 180.0, (double)distAve, relOrientHist);
+                features[i] = feature;
+            }
+            return features;
+        }
+
+
+
+        visualization_msgs::msg::Marker makeSDFKeypointsMarker(std::vector<Keypoint> keypoints, std::string frame) {
+            visualization_msgs::msg::Marker marker;
+            marker.header.frame_id = frame;
+            marker.ns = "gl_marker_namespace";
+            marker.id = 0;
+            marker.type = visualization_msgs::msg::Marker::SPHERE_LIST;
+            marker.action = visualization_msgs::msg::Marker::ADD;
+            marker.scale.x = 0.2;
+            marker.scale.y = 0.2;
+            marker.scale.z = 0.2;
+            std_msgs::msg::ColorRGBA c;
+            c.a = 1.0;
+            marker.points.resize((int)keypoints.size());
+            marker.colors.resize((int)keypoints.size());
+            for (int i = 0; i < (int)keypoints.size(); ++i) {
+                geometry_msgs::msg::Point p;
+                p.x = keypoints[i].getX();
+                p.y = keypoints[i].getY();
+                p.z = 0.0;
+                char type = keypoints[i].getType();
+                if (type == 1)
+                    c.r = 1.0, c.g = 0.0, c.b = 1.0;
+                else if (type == -1)
+                    c.r = 0.0, c.g = 1.0, c.b = 1.0;
+                else
+                    c.r = 1.0, c.g = 1.0, c.b = 0.0;
+                marker.points[i] = p;
+                marker.colors[i] = c;
+            }
+            return marker;
+        }
+
     public:
         GLPoseSampler() : Node("gl_pose_sampler")
         {
@@ -498,171 +648,9 @@ namespace als_ros2
 
 
 
-        cv::Mat buildDistanceFieldMap(nav_msgs::OccupancyGrid map) {
-            cv::Mat binMap(map.info.height, map.info.width, CV_8UC1);
-            for (int v = 0; v < map.info.height; v++) {
-                for (int u = 0; u < map.info.width; u++) {
-                    int n = v * map.info.width + u;
-                    int val = map.data[n];
-                    if (val == 100)
-                        binMap.at<uchar>(v, u) = 0;
-                    else
-                        binMap.at<uchar>(v, u) = 1;
-                }
-            }
 
-            cv::Mat distMap(map.info.height, map.info.width, CV_32FC1);
-            cv::distanceTransform(binMap, distMap, cv::DIST_L2, 5);
-            for (int v = 0; v < map.info.height; v++) {
-                for (int u = 0; u < map.info.width; u++) {
-                    float d = distMap.at<float>(v, u) * (float)map.info.resolution;
-                    distMap.at<float>(v, u) = d;
-                }
-            }
-            return distMap;
-        }
 
-        std::vector<Keypoint> detectKeypoints(nav_msgs::OccupancyGrid map, cv::Mat distMap) {
-            std::vector<Keypoint> keypoints;
-            tf::Quaternion q(map.info.origin.orientation.x,
-                map.info.origin.orientation.y,
-                map.info.origin.orientation.z,
-                map.info.origin.orientation.w);
-            double roll, pitch, yaw;
-            tf::Matrix3x3 m(q);
-            m.getRPY(roll, pitch, yaw);
-            mapOrigin_.setYaw(yaw);
-            for (int u = 1; u < map.info.width - 1; ++u) {
-                for (int v = 1; v < map.info.height - 1; ++v) {
-                    int n = v * map.info.width + u;
-                    if (map.data[n] != 0 || distMap.at<float>(v, u) < keypointsMinDistFromMap_)
-                        continue;
 
-                    float dx = -distMap.at<float>(v - 1, u - 1) - distMap.at<float>(v, u - 1) - distMap.at<float>(v + 1, u - 1)
-                                + distMap.at<float>(v - 1, u + 1) + distMap.at<float>(v, u + 1) + distMap.at<float>(v + 1, u + 1);
-                    float dy = -distMap.at<float>(v - 1, u - 1) - distMap.at<float>(v - 1, u) - distMap.at<float>(v - 1, u + 1)
-                                + distMap.at<float>(v + 1, u - 1) + distMap.at<float>(v + 1, u) + distMap.at<float>(v + 1, u + 1);
-
-                    float dxx = distMap.at<float>(v, u - 1) - 2.0 * distMap.at<float>(v, u) + distMap.at<float>(v, u + 1);
-                    float dyy = distMap.at<float>(v - 1, u) - 2.0 * distMap.at<float>(v, u) + distMap.at<float>(v + 1, u);
-                    float dxy = distMap.at<float>(v - 1, u - 1) - distMap.at<float>(v - 1, u)
-                                - distMap.at<float>(v, u - 1) + 2.0 * distMap.at<float>(v, u) - distMap.at<float>(v, u + 1)
-                                - distMap.at<float>(v + 1, u) + distMap.at<float>(v + 1, u + 1);
-                    float det = dxx * dyy - dxy * dxy;
-
-                    if (dx * dx < gradientSquareTH_ && dy * dy < gradientSquareTH_) {
-                        double xx = (double)u * map.info.resolution;
-                        double yy = (double)v * map.info.resolution;
-                        double dx = xx * cos(yaw) - yy * sin(yaw);
-                        double dy = xx * sin(yaw) + yy * cos(yaw);
-                        double x = dx + map.info.origin.position.x;
-                        double y = dy + map.info.origin.position.y;
-                        if (det > 0.0 && dxx < 0.0) // local maxima
-                            keypoints.push_back(Keypoint(u, v, x, y, 1));
-                        else if (det > 0.0 && dxx > 0.0) // local minima
-                            keypoints.push_back(Keypoint(u, v, x, y, -1));
-                        else if (det < 0.0) // suddle
-                            keypoints.push_back(Keypoint(u, v, x, y, 0));
-                    }
-                }
-            }
-            return keypoints;
-        }
-
-        std::vector<SDFOrientationFeature> calculateFeatures(cv::Mat distMap, std::vector<Keypoint> keypoints) {
-            std::vector<SDFOrientationFeature> features((int)keypoints.size());
-            for (int i = 0; i < (int)keypoints.size(); ++i) {
-                int r = (int)(sdfFeatureWindowSize_ / mapResolution_);
-                int uo = keypoints[i].getU();
-                int vo = keypoints[i].getV();
-                float distSum = 0.0f;
-                int cellNum = 0;
-                std::vector<int> orientHist(36);
-                std::vector<double> orientations;
-
-                for (int u = uo - r; u <= uo + r; ++u) {
-                    for (int v = vo - r; v <= vo + r; ++v) {
-                        if (u < 1 || distMap.cols - 1 < u || v < 1 || distMap.rows - 1 < v)
-                            continue;
-
-                        distSum += distMap.at<float>(v, u);
-                        cellNum++;
-
-                        float dx = -distMap.at<float>(v - 1, u - 1) - distMap.at<float>(v, u - 1) - distMap.at<float>(v + 1, u - 1)
-                                    + distMap.at<float>(v - 1, u + 1) + distMap.at<float>(v, u + 1) + distMap.at<float>(v + 1, u + 1);
-                        float dy = -distMap.at<float>(v - 1, u - 1) - distMap.at<float>(v - 1, u) - distMap.at<float>(v - 1, u + 1)
-                                    + distMap.at<float>(v + 1, u - 1) + distMap.at<float>(v + 1, u) + distMap.at<float>(v + 1, u + 1);
-                        double t = atan2((double)dy, (double)dx) * 180.0 / M_PI;
-                        if (t < 0.0)
-                            t += 360.0;
-                        int orientIdx = (int)(t / 10.0);
-                        if (0 <= orientIdx && orientIdx < 36) {
-                            orientHist[orientIdx]++;
-                            orientations.push_back(t);
-                        }
-                    }
-                }
-
-                float distAve = distSum / (float)cellNum;
-
-                int maxVal = orientHist[0];
-                double domOrient = 0.0;
-                for (int j = 1; j < (int)orientHist.size(); ++j) {
-                    if (orientHist[j] > maxVal) {
-                        maxVal = orientHist[j];
-                        domOrient = (double)j * 10.0;
-                    }
-                }
-
-                std::vector<int> relOrientHist(17);
-                for (int j = 0; j < (int)orientations.size(); ++j) {
-                    double dt = domOrient - orientations[j];
-                    while (dt > 180.0)
-                        dt -= 360.0;
-                    while (dt < -180.0)
-                        dt += 360.0;
-                    int relOrientIdx = (int)(fabs(dt) / 10.0);
-                    if (0 <= relOrientIdx && relOrientIdx < 17)
-                        relOrientHist[relOrientIdx]++;
-                }
-
-                SDFOrientationFeature feature(domOrient * M_PI / 180.0, (double)distAve, relOrientHist);
-                features[i] = feature;
-            }
-            return features;
-        }
-
-        visualization_msgs::Marker makeSDFKeypointsMarker(std::vector<Keypoint> keypoints, std::string frame) {
-            visualization_msgs::Marker marker;
-            marker.header.frame_id = frame;
-            marker.ns = "gl_marker_namespace";
-            marker.id = 0;
-            marker.type = visualization_msgs::Marker::SPHERE_LIST;
-            marker.action = visualization_msgs::Marker::ADD;
-            marker.scale.x = 0.2;
-            marker.scale.y = 0.2;
-            marker.scale.z = 0.2;
-            std_msgs::ColorRGBA c;
-            c.a = 1.0;
-            marker.points.resize((int)keypoints.size());
-            marker.colors.resize((int)keypoints.size());
-            for (int i = 0; i < (int)keypoints.size(); ++i) {
-                geometry_msgs::Point p;
-                p.x = keypoints[i].getX();
-                p.y = keypoints[i].getY();
-                p.z = 0.0;
-                char type = keypoints[i].getType();
-                if (type == 1)
-                    c.r = 1.0, c.g = 0.0, c.b = 1.0;
-                else if (type == -1)
-                    c.r = 0.0, c.g = 1.0, c.b = 1.0;
-                else
-                    c.r = 1.0, c.g = 1.0, c.b = 0.0;
-                marker.points[i] = p;
-                marker.colors[i] = c;
-            }
-            return marker;
-        }
 
         // it does not correspond to rotation of the map
         void writeMapAndKeypoints(nav_msgs::OccupancyGrid map, std::vector<Keypoint> keypoints) {
@@ -986,7 +974,7 @@ namespace als_ros2
     //            writeMapAndKeypoints(localMap, localSDFKeypoints);
                 std::vector<int> correspondingIndices = findCorrespondingFeatures(localSDFKeypoints, localSDFOrientationFeatures);
                 geometry_msgs::PoseArray poses = generatePoses(prevOdomPose, localSDFKeypoints, localSDFOrientationFeatures, correspondingIndices);
-                visualization_msgs::Marker localSDFKeypointsMarker = makeSDFKeypointsMarker(localSDFKeypoints, odomFrame_);
+                visualization_msgs::msg::Marker localSDFKeypointsMarker = makeSDFKeypointsMarker(localSDFKeypoints, odomFrame_);
 
                 poses.header.stamp = localMap.header.stamp = sdfKeypointsMarker_.header.stamp = localSDFKeypointsMarker.header.stamp = msg->header.stamp;
                 posesPub_.publish(poses);
