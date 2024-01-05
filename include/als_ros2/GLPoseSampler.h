@@ -194,6 +194,10 @@ namespace als_ros2
 
         geometry_msgs::msg::TransformStamped tfBaseLink2Laser;
 
+        std::mutex mutex_;
+        std::condition_variable cv_;
+        bool transform_ready_ = false;
+
     public:
         GLPoseSampler() : Node("gl_pose_sampler")
         {
@@ -311,14 +315,16 @@ namespace als_ros2
             // check for transformations between base link frame and laser frame
             try
             {
-                // TODO: change the duration of this wait
-                tf_buffer_->waitForTransform(baseLinkFrame_, laserFrame_, tf2::TimePointZero, tf2::durationFromSec(10.0),
+                tf_buffer_->waitForTransform(baseLinkFrame_, laserFrame_, tf2::TimePointZero, tf2::durationFromSec(60.0),
                                              [this](const tf2_ros::TransformStampedFuture &future)
                                              {
+                                                 std::unique_lock<std::mutex> lock(mutex_);
                                                  try
                                                  {
 
                                                      this->tfBaseLink2Laser = future.get();
+                                                     transform_ready_ = true;
+                                                     cv_.notify_one();
 
                                                      RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "Transform from %s to %s is ready!",
                                                                  this->tfBaseLink2Laser.header.frame_id.c_str(),
@@ -339,17 +345,19 @@ namespace als_ros2
                 throw;
             }
 
-            // print out the quaternion values from tfBaseLink2Laser
-            RCLCPP_INFO(this->get_logger(), "tfBaseLink2Laser: %f, %f, %f, %f",
-                        tfBaseLink2Laser.transform.rotation.x,
-                        tfBaseLink2Laser.transform.rotation.y,
-                        tfBaseLink2Laser.transform.rotation.z,
-                        tfBaseLink2Laser.transform.rotation.w);
+            std::unique_lock<std::mutex> lock(mutex_);
+            cv_.wait(lock, [this]
+                     { return transform_ready_; });
 
             tf2::Quaternion quatBaseLink2Laser(tfBaseLink2Laser.transform.rotation.x,
                                                tfBaseLink2Laser.transform.rotation.y,
                                                tfBaseLink2Laser.transform.rotation.z,
                                                tfBaseLink2Laser.transform.rotation.w);
+
+            double baseLink2LaserRoll, baseLink2LaserPitch, baseLink2LaserYaw;
+            tf2::Matrix3x3 rotMatBaseLink2Laser(quatBaseLink2Laser);
+
+            rotMatBaseLink2Laser.getRPY(baseLink2LaserRoll, baseLink2LaserPitch, baseLink2LaserYaw);
         }
 
         void checkMapOdom()
@@ -398,15 +406,11 @@ namespace als_ros2
         {
 
 
-            tf::Quaternion quatBaseLink2Laser(tfBaseLink2Laser.getRotation().x(),
-                tfBaseLink2Laser.getRotation().y(),
-                tfBaseLink2Laser.getRotation().z(),
-                tfBaseLink2Laser.getRotation().w());
 
 
-            double baseLink2LaserRoll, baseLink2LaserPitch, baseLink2LaserYaw;
-            tf::Matrix3x3 rotMatBaseLink2Laser(quatBaseLink2Laser);
-            rotMatBaseLink2Laser.getRPY(baseLink2LaserRoll, baseLink2LaserPitch, baseLink2LaserYaw);
+
+
+
 
             baseLink2Laser_.setX(tfBaseLink2Laser.getOrigin().x());
             baseLink2Laser_.setY(tfBaseLink2Laser.getOrigin().y());
