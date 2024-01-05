@@ -14,10 +14,11 @@ find_package(visualization_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(tf2 REQUIRED)
+find_package(OpenCV REQUIRED)
 
 
 add_executable(gl_pose_sampler src/gl_pose_sampler.cpp)
-ament_target_dependencies(gl_pose_sampler rclcpp sensor_msgs nav_msgs geometry_msgs visualization_msgs tf2_ros)
+ament_target_dependencies(gl_pose_sampler rclcpp sensor_msgs nav_msgs geometry_msgs visualization_msgs tf2_ros OpenCV)
 target_include_directories(gl_pose_sampler
   PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>

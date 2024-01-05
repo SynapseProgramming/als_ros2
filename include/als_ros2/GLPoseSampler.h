@@ -29,7 +29,8 @@
 // #include <nav_msgs/Odometry.h>
 // #include <tf/transform_broadcaster.h>
 // #include <tf/transform_listener.h>
-// #include <opencv2/opencv.hpp>
+
+#include <opencv2/opencv.hpp>
 
 #include <nav_msgs/msg/occupancy_grid.hpp>
 #include <nav_msgs/msg/odometry.hpp>
@@ -198,6 +199,80 @@ namespace als_ros2
         std::condition_variable cv_;
         bool transform_ready_ = false;
 
+        inline double nrand(double n)
+        {
+            return (n * sqrt(-2.0 * log((double)rand() / RAND_MAX)) * cos(2.0 * M_PI * rand() / RAND_MAX));
+        }
+
+        inline void xy2uv(double x, double y, int *u, int *v)
+        {
+            double dx = x - mapOrigin_.getX();
+            double dy = y - mapOrigin_.getY();
+            double yaw = -mapOrigin_.getYaw();
+            double xx = dx * cos(yaw) - dy * sin(yaw);
+            double yy = dx * sin(yaw) + dy * cos(yaw);
+            *u = (int)(xx / mapResolution_);
+            *v = (int)(yy / mapResolution_);
+        }
+
+        inline void uv2xy(int u, int v, double *x, double *y)
+        {
+            double xx = (double)u * mapResolution_;
+            double yy = (double)v * mapResolution_;
+            double yaw = mapOrigin_.getYaw();
+            double dx = xx * cos(yaw) - yy * sin(yaw);
+            double dy = xx * sin(yaw) + yy * cos(yaw);
+            *x = dx + mapOrigin_.getX();
+            *y = dy + mapOrigin_.getY();
+        }
+
+        void setMapInfo(nav_msgs::msg::OccupancyGrid map)
+        {
+            mapWidth_ = map.info.width;
+            mapHeight_ = map.info.height;
+            mapResolution_ = map.info.resolution;
+            mapOrigin_.setX(map.info.origin.position.x);
+            mapOrigin_.setY(map.info.origin.position.y);
+            tf2::Quaternion q(map.info.origin.orientation.x,
+                              map.info.origin.orientation.y,
+                              map.info.origin.orientation.z,
+                              map.info.origin.orientation.w);
+            double roll, pitch, yaw;
+            tf2::Matrix3x3 m(q);
+            m.getRPY(roll, pitch, yaw);
+            mapOrigin_.setYaw(yaw);
+            mapData_ = map.data;
+        }
+
+        cv::Mat buildDistanceFieldMap(nav_msgs::msg::OccupancyGrid map)
+        {
+            cv::Mat binMap(map.info.height, map.info.width, CV_8UC1);
+            for (int v = 0; v < (int)map.info.height; v++)
+            {
+                for (int u = 0; u < (int)map.info.width; u++)
+                {
+                    int n = v * map.info.width + u;
+                    int val = map.data[n];
+                    if (val == 100)
+                        binMap.at<uchar>(v, u) = 0;
+                    else
+                        binMap.at<uchar>(v, u) = 1;
+                }
+            }
+
+            cv::Mat distMap(map.info.height, map.info.width, CV_32FC1);
+            cv::distanceTransform(binMap, distMap, cv::DIST_L2, 5);
+            for (int v = 0; v < (int)map.info.height; v++)
+            {
+                for (int u = 0; u < (int)map.info.width; u++)
+                {
+                    float d = distMap.at<float>(v, u) * (float)map.info.resolution;
+                    distMap.at<float>(v, u) = d;
+                }
+            }
+            return distMap;
+        }
+
     public:
         GLPoseSampler() : Node("gl_pose_sampler")
         {
@@ -358,6 +433,10 @@ namespace als_ros2
             tf2::Matrix3x3 rotMatBaseLink2Laser(quatBaseLink2Laser);
 
             rotMatBaseLink2Laser.getRPY(baseLink2LaserRoll, baseLink2LaserPitch, baseLink2LaserYaw);
+
+            baseLink2Laser_.setX(tfBaseLink2Laser.transform.translation.x);
+            baseLink2Laser_.setY(tfBaseLink2Laser.transform.translation.y);
+            baseLink2Laser_.setYaw(baseLink2LaserYaw);
         }
 
         void checkMapOdom()
@@ -407,16 +486,6 @@ namespace als_ros2
 
 
 
-
-
-
-
-
-            baseLink2Laser_.setX(tfBaseLink2Laser.getOrigin().x());
-            baseLink2Laser_.setY(tfBaseLink2Laser.getOrigin().y());
-            baseLink2Laser_.setYaw(baseLink2LaserYaw);
-
-            ROS_INFO("GL pose sampler ready to perform.");
         }
 
         void spin(void) {
@@ -424,46 +493,10 @@ namespace als_ros2
         }
 
     private:
-        inline double nrand(double n) {
-            return (n * sqrt(-2.0 * log((double)rand() / RAND_MAX)) * cos(2.0 * M_PI * rand() / RAND_MAX));
-        }
 
-        inline void xy2uv(double x, double y, int *u, int *v) {
-            double dx = x - mapOrigin_.getX();
-            double dy = y - mapOrigin_.getY();
-            double yaw = -mapOrigin_.getYaw();
-            double xx = dx * cos(yaw) - dy * sin(yaw);
-            double yy = dx * sin(yaw) + dy * cos(yaw);
-            *u = (int)(xx / mapResolution_);
-            *v = (int)(yy / mapResolution_);
-        }
 
-        inline void uv2xy(int u, int v, double *x, double *y) {
-            double xx = (double)u * mapResolution_;
-            double yy = (double)v * mapResolution_;
-            double yaw = mapOrigin_.getYaw();
-            double dx = xx * cos(yaw) - yy * sin(yaw);
-            double dy = xx * sin(yaw) + yy * cos(yaw);
-            *x = dx + mapOrigin_.getX();
-            *y = dy + mapOrigin_.getY();
-        }
 
-        void setMapInfo(nav_msgs::OccupancyGrid map) {
-            mapWidth_ = map.info.width;
-            mapHeight_ = map.info.height;
-            mapResolution_ = map.info.resolution;
-            mapOrigin_.setX(map.info.origin.position.x);
-            mapOrigin_.setY(map.info.origin.position.y);
-            tf::Quaternion q(map.info.origin.orientation.x,
-                map.info.origin.orientation.y,
-                map.info.origin.orientation.z,
-                map.info.origin.orientation.w);
-            double roll, pitch, yaw;
-            tf::Matrix3x3 m(q);
-            m.getRPY(roll, pitch, yaw);
-            mapOrigin_.setYaw(yaw);
-            mapData_ = map.data;
-        }
+
 
         cv::Mat buildDistanceFieldMap(nav_msgs::OccupancyGrid map) {
             cv::Mat binMap(map.info.height, map.info.width, CV_8UC1);
