@@ -187,8 +187,6 @@ namespace als_ros2
         int randomSamplesNum_;
         double positionalRandomNoise_, angularRandomNoise_, matchingRateTH_;
 
-        rclcpp::TimerBase::SharedPtr flagTimer_;
-
         geometry_msgs::msg::TransformStamped tfBaseLink2Laser;
 
         std::mutex mutex_;
@@ -777,9 +775,7 @@ namespace als_ros2
             keyScanIntervalYaw_ *= M_PI / 180.0;
             odomPose_.setPose(0.0, 0.0, 0.0);
 
-            flagTimer_ = this->create_wall_timer(
-                std::chrono::seconds(1000),
-                std::bind(&GLPoseSampler::checkMapOdom, this));
+       
 
             // check for transformations between base link frame and laser frame
             try
@@ -833,22 +829,7 @@ namespace als_ros2
             baseLink2Laser_.setYaw(baseLink2LaserYaw);
         }
 
-        void checkMapOdom()
-        {
-
-            RCLCPP_INFO(this->get_logger(), "Checking flags...");
-            if (!gotMap_)
-            {
-                RCLCPP_INFO(this->get_logger(), "No map yet...");
-                rclcpp::shutdown();
-            }
-
-            if (!gotOdom_)
-            {
-                RCLCPP_INFO(this->get_logger(), "No odom yet...");
-                rclcpp::shutdown();
-            }
-        }
+    
 
         void mapCB(const nav_msgs::msg::OccupancyGrid::SharedPtr msg)
         {
