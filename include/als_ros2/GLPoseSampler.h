@@ -24,12 +24,6 @@
 #ifndef __GL_POSE_SAMPLER_H__
 #define __GL_POSE_SAMPLER_H__
 
-// #include <sensor_msgs/LaserScan.h>
-// #include <nav_msgs/OccupancyGrid.h>
-// #include <nav_msgs/Odometry.h>
-// #include <tf/transform_broadcaster.h>
-// #include <tf/transform_listener.h>
-
 #include <opencv2/opencv.hpp>
 
 #include <nav_msgs/msg/occupancy_grid.hpp>
@@ -48,6 +42,7 @@
 
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
+#include <rclcpp/qos.hpp>
 
 using namespace std::chrono_literals;
 
@@ -752,7 +747,7 @@ namespace als_ros2
             gotOdom_ = false;
 
             mapSub_ = this->create_subscription<nav_msgs::msg::OccupancyGrid>(
-                mapName_, 1, std::bind(&GLPoseSampler::mapCB, this, std::placeholders::_1));
+                mapName_, rclcpp::QoS(rclcpp::KeepLast(10)).transient_local(), std::bind(&GLPoseSampler::mapCB, this, std::placeholders::_1));
 
             scanSub_ = this->create_subscription<sensor_msgs::msg::LaserScan>(
                 scanName_, 1, std::bind(&GLPoseSampler::scanCB, this, std::placeholders::_1));
@@ -783,7 +778,7 @@ namespace als_ros2
             odomPose_.setPose(0.0, 0.0, 0.0);
 
             flagTimer_ = this->create_wall_timer(
-                std::chrono::seconds(300),
+                std::chrono::seconds(1000),
                 std::bind(&GLPoseSampler::checkMapOdom, this));
 
             // check for transformations between base link frame and laser frame
@@ -865,12 +860,16 @@ namespace als_ros2
             sdfOrientationFeatures_ = calculateFeatures(distMap, sdfKeypoints_);
             sdfKeypointsMarker_ = makeSDFKeypointsMarker(sdfKeypoints_, mapFrame_);
             sdfKeypointsPub_->publish(sdfKeypointsMarker_);
+            // print out a statement to show that the callback is running
+            RCLCPP_INFO(this->get_logger(), "Map callback is running...");
 
             gotMap_ = true;
         }
 
         void scanCB(const sensor_msgs::msg::LaserScan::SharedPtr msg)
         {
+            // print out a statement to show that the callback is running
+            // RCLCPP_INFO(this->get_logger(), "Scan callback is running...");
             static bool isFirst = true;
             static Pose prevOdomPose;
 
@@ -931,6 +930,11 @@ namespace als_ros2
                 visualization_msgs::msg::Marker localSDFKeypointsMarker = makeSDFKeypointsMarker(localSDFKeypoints, odomFrame_);
 
                 poses.header.stamp = localMap.header.stamp = sdfKeypointsMarker_.header.stamp = localSDFKeypointsMarker.header.stamp = msg->header.stamp;
+                // print out the poses
+                for (int i = 0; i < poses.poses.size(); i++)
+                {
+                    RCLCPP_INFO(this->get_logger(), "Pose %d: %f, %f, %f", i, poses.poses[i].position.x, poses.poses[i].position.y, poses.poses[i].position.z);
+                }
                 posesPub_->publish(poses);
                 localMapPub_->publish(localMap);
                 sdfKeypointsPub_->publish(sdfKeypointsMarker_);
@@ -940,6 +944,8 @@ namespace als_ros2
 
         void odomCB(const nav_msgs::msg::Odometry::SharedPtr msg)
         {
+            // print a message to show that odom callback is running
+            // RCLCPP_INFO(this->get_logger(), "Odom callback is running...");
             tf2::Quaternion q(msg->pose.pose.orientation.x,
                               msg->pose.pose.orientation.y,
                               msg->pose.pose.orientation.z,
@@ -951,7 +957,6 @@ namespace als_ros2
             gotOdom_ = true;
         }
     };
-
 
 } // namespace als_ros2
 
