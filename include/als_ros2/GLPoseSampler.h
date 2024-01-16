@@ -167,6 +167,7 @@ namespace als_ros2
         Pose mapOrigin_;
         std::vector<signed char> mapData_;
         bool gotMap_;
+        bool flipScan_;
 
         sensor_msgs::msg::LaserScan scan_;
         double keyScanIntervalDist_, keyScanIntervalYaw_;
@@ -186,8 +187,6 @@ namespace als_ros2
         bool addRandomSamples_, addOppositeSamples_;
         int randomSamplesNum_;
         double positionalRandomNoise_, angularRandomNoise_, matchingRateTH_;
-
-        rclcpp::TimerBase::SharedPtr flagTimer_;
 
         geometry_msgs::msg::TransformStamped tfBaseLink2Laser;
 
@@ -490,7 +489,7 @@ namespace als_ros2
                 double localAverageSDF = localFeatures[i].getAverageSDF();
                 std::vector<int> localRelOrientHist = localFeatures[i].getRelativeOrientationHist();
                 bool isFirst = true, isSecond = true;
-                int idx1, idx2, min1 = -1, min2 = -1;
+                int idx1 = 0, idx2 = 0, min1 = -1, min2 = -1;
                 for (int j = 0; j < (int)sdfKeypoints_.size(); ++j)
                 {
                     if (localKeypointType != sdfKeypoints_[j].getType())
@@ -558,6 +557,7 @@ namespace als_ros2
             for (int i = 0; i < (int)scan.ranges.size(); ++i)
             {
                 double r = scan.ranges[i];
+
                 if (r < scan.range_min || scan.range_max < r)
                     continue;
                 if (r < keypointsMinDistFromMap_)
@@ -704,10 +704,10 @@ namespace als_ros2
             this->declare_parameter<std::string>("laser_frame", "base_laser");
             this->get_parameter("laser_frame", laserFrame_);
 
-            this->declare_parameter<int>("key_scans_num", 5);
+            this->declare_parameter<int>("key_scans_num", 20);
             this->get_parameter("key_scans_num", keyScansNum_);
 
-            this->declare_parameter<double>("key_scan_interval_dist", 0.5);
+            this->declare_parameter<double>("key_scan_interval_dist", 0.25);
             this->get_parameter("key_scan_interval_dist", keyScanIntervalDist_);
 
             this->declare_parameter<double>("key_scan_interval_yaw", 5.0);
@@ -716,7 +716,7 @@ namespace als_ros2
             this->declare_parameter<double>("gradient_square_th", 10e-4);
             this->get_parameter("gradient_square_th", gradientSquareTH_);
 
-            this->declare_parameter<double>("keypoints_min_dist_from_map", 1.0);
+            this->declare_parameter<double>("keypoints_min_dist_from_map", 0.2);
             this->get_parameter("keypoints_min_dist_from_map", keypointsMinDistFromMap_);
 
             this->declare_parameter<double>("sdf_feature_window_size", 1.0);
@@ -731,7 +731,7 @@ namespace als_ros2
             this->declare_parameter<bool>("add_opposite_samples", true);
             this->get_parameter("add_opposite_samples", addOppositeSamples_);
 
-            this->declare_parameter<int>("random_samples_num", 10);
+            this->declare_parameter<int>("random_samples_num", 30);
             this->get_parameter("random_samples_num", randomSamplesNum_);
 
             this->declare_parameter<double>("positional_random_noise", 0.5);
@@ -742,6 +742,9 @@ namespace als_ros2
 
             this->declare_parameter<double>("matching_rate_th", 0.1);
             this->get_parameter("matching_rate_th", matchingRateTH_);
+
+            this->declare_parameter<bool>("flip_scan", true);
+            this->get_parameter("flip_scan", flipScan_);
 
             gotMap_ = false;
             gotOdom_ = false;
@@ -776,10 +779,6 @@ namespace als_ros2
 
             keyScanIntervalYaw_ *= M_PI / 180.0;
             odomPose_.setPose(0.0, 0.0, 0.0);
-
-            flagTimer_ = this->create_wall_timer(
-                std::chrono::seconds(1000),
-                std::bind(&GLPoseSampler::checkMapOdom, this));
 
             // check for transformations between base link frame and laser frame
             try
@@ -833,23 +832,6 @@ namespace als_ros2
             baseLink2Laser_.setYaw(baseLink2LaserYaw);
         }
 
-        void checkMapOdom()
-        {
-
-            RCLCPP_INFO(this->get_logger(), "Checking flags...");
-            if (!gotMap_)
-            {
-                RCLCPP_INFO(this->get_logger(), "No map yet...");
-                rclcpp::shutdown();
-            }
-
-            if (!gotOdom_)
-            {
-                RCLCPP_INFO(this->get_logger(), "No odom yet...");
-                rclcpp::shutdown();
-            }
-        }
-
         void mapCB(const nav_msgs::msg::OccupancyGrid::SharedPtr msg)
         {
 
@@ -872,6 +854,17 @@ namespace als_ros2
             // RCLCPP_INFO(this->get_logger(), "Scan callback is running...");
             static bool isFirst = true;
             static Pose prevOdomPose;
+
+            if (flipScan_)
+            {
+                // invert ranges to account for flippled lidar
+                std::vector<float> ranges = msg->ranges;
+                for (int i = 0; i < (int)ranges.size(); ++i)
+                {
+                    ranges[i] = msg->ranges[(int)msg->ranges.size() - 1 - i];
+                }
+                msg->ranges = ranges;
+            }
 
             int validScanNum = 0;
             for (int i = 0; i < (int)msg->ranges.size(); ++i)
@@ -930,11 +923,6 @@ namespace als_ros2
                 visualization_msgs::msg::Marker localSDFKeypointsMarker = makeSDFKeypointsMarker(localSDFKeypoints, odomFrame_);
 
                 poses.header.stamp = localMap.header.stamp = sdfKeypointsMarker_.header.stamp = localSDFKeypointsMarker.header.stamp = msg->header.stamp;
-                // print out the poses
-                for (int i = 0; i < poses.poses.size(); i++)
-                {
-                    RCLCPP_INFO(this->get_logger(), "Pose %d: %f, %f, %f", i, poses.poses[i].position.x, poses.poses[i].position.y, poses.poses[i].position.z);
-                }
                 posesPub_->publish(poses);
                 localMapPub_->publish(localMap);
                 sdfKeypointsPub_->publish(sdfKeypointsMarker_);
