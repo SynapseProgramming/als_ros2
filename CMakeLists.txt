@@ -25,6 +25,13 @@ target_include_directories(gl_pose_sampler
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>)
 
+add_executable(mcl src/mcl.cpp)
+ament_target_dependencies(mcl rclcpp sensor_msgs nav_msgs geometry_msgs visualization_msgs tf2_ros OpenCV tf2_geometry_msgs)
+target_include_directories(mcl
+  PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>)
+
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
